@@ -1,32 +1,35 @@
 # **DiscordGameManager**
-DiscordGameManager is a bot for community-driven game server management. Designed for Steam on Windows (and later Linux), share the running and updating responsibilities of dedicated servers through Discord roles and text channels.
+DiscordGameManager is a Python 3 bot for community-driven game server management. Designed for Steam on Windows (and later Linux), share the running and updating responsibilities of dedicated servers through Discord roles and text channels.
 
-## **Features**
+# Features
 
 - **Server Management**: Keep your servers up to date, start and stop games, and switch branches easily.
 - **Shared Administration**: Decentralize server administration tasks among your community members.
 - **Compatibility**: Built for dedicated servers accessiable via steamcmd anonymous login targeting tools on both Windows and Linux systems.
 
-## **Installation**
+# License
 
-(Include step-by-step instructions on how to install and configure your bot.)
+DiscordGameManager is licensed under GNU AFFERO GENERAL PUBLIC LICENSE (AGPL) v3.0. See the LICENSE file for more details.
 
-## **Usage**
+# Contributing
 
-(Explain how to use the bot, possibly with examples of commands and their effects.)
+We encourage contributions. Please read our contributing guidelines at the end of the readme before submitting any pull requests.
 
-## **Contributing**
+# Community
 
-We encourage contributions. Please read our contributing guidelines before submitting any pull requests.
+RocketWerkz uses discord communities for engagement, centralized around invidividual game titles.
+* Icarus: https://discord.gg/surviveicarus
+* Stationeers: https://discord.gg/stationeers 
 
-### **Contribution Guidelines:**
+# Installation
 
-(Expand Guideliness)
+To get full functionality of the bots design, there are some dependancies on Microsoft Sysinternal Tools https://learn.microsoft.com/en-us/sysinternals/ as they provide critical functionality for overcoming windows system account, windows services, and session 0 design. A few of the first setup steps can be considered optional depending on your environment and security concerns.
 
-## **License**
+# Usage
 
-DiscordGameManager is licensed under GNU General Public License (GPL) v3.0. See the LICENSE file for more details.
+## First Time
+Use the switch to select the public (or other) branch.  This will install the game for the first time in the default steamapps directory.
 
-## **Community**
+# Contribution Guidelines:
 
-RocketWerkz has many communities for engagement, centralized around invidividual game titles.
+(Expand Guidelines)
