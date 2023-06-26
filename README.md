@@ -1,5 +1,5 @@
 # **DiscordGameManager**
-DiscordGameManager is a Python 3 bot for community-driven game server management. Designed for Steam on Windows (and later Linux), share the running and updating responsibilities of dedicated servers through Discord roles and text channels.
+DiscordGameManager is a Python 3 bot for community-driven game server management. Designed for Steam on Windows (and later Linux), share the running and updating responsibilities of dedicated servers through use of Discord's roles and text channels.
 
 # Features
 
