@@ -11,6 +11,7 @@ import sys
 import time
 import subprocess
 import requests
+import asyncio
 
 # Initialize logging
 logger = logging.getLogger('discord')
@@ -165,21 +166,20 @@ def test_new_code():
 
 
 # Function to process all extensions in the EXTENSIONS_DIRECTORY
-def process_all_extensions():
+async def process_all_extensions():
     for filename in os.listdir(EXTENSIONS_DIRECTORY):
         if filename.endswith('.py'):
             extension_name = f'extensions.{filename[:-3]}'
-
             # Check if extension is already loaded
             if extension_name in bot.extensions:
                 try:
-                    bot.reload_extension(extension_name)
+                    await bot.reload_extension(extension_name)  # add await
                     logger.info(f"Reloaded extension: {extension_name}")
                 except (commands.ExtensionNotFound, commands.ExtensionFailed) as e:
                     logger.error(f"Failed to reload extension {extension_name}: {e}")
             else:
                 try:
-                    bot.load_extension(extension_name)
+                    await bot.load_extension(extension_name)  # add await
                     logger.info(f"Loaded extension: {extension_name}")
                 except (commands.ExtensionNotFound, commands.ExtensionFailed) as e:
                     logger.error(f"Failed to load extension {extension_name}: {e}")
@@ -314,7 +314,8 @@ async def source(ctx):
 
 
 if __name__ == '__main__':
-    process_all_extensions()  # Function to load Discord extensions
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(process_all_extensions())
     max_retries = 5
     for i in range(max_retries):
         try:
