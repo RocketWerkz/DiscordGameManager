@@ -12,13 +12,13 @@ import time
 import subprocess
 import requests
 import asyncio
+import json
+import gevent
+import platform
+from steam.client import SteamClient
 
-# Initialize logging
-logger = logging.getLogger('discord')
-logger.setLevel(logging.INFO)
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
-handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
-logger.addHandler(handler)
+# Initialize default logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 
 # Load environment variables
 load_dotenv()
@@ -29,6 +29,9 @@ BOT_DIRECTORY = os.path.dirname(os.path.realpath(__file__))
 STAGING_DIRECTORY = os.path.join(BOT_DIRECTORY, 'staging')
 EXTENSIONS_DIRECTORY = os.path.join(BOT_DIRECTORY, 'extensions')
 COGS_DIRECTORY = os.path.join(BOT_DIRECTORY, 'cogs')
+APP_ID_LIST = os.getenv('APP_ID_LIST')
+COMPUTER_NAME = os.environ.get("COMPUTERNAME", "") if os.name == 'nt' else os.environ.get("HOSTNAME", "")
+
 # Random hash included in UNSET_VALUE_ to prevent accidental use of UNSET_VALUE_
 unset = "UNSET_BRANCH_5f3a2b1"
 
@@ -58,7 +61,7 @@ def get_github_default_branch(repo_url):
         if response.status_code == 200:
             return response.json()["default_branch"]
     except Exception as e:
-        logger.error(f"Could not get default branch: {e}")
+        logging.error(f"Could not get default branch: {e}")
         return None
 
 
@@ -70,7 +73,7 @@ def get_git_info(repo_path, target_branch=unset):
                 if target_branch is None:
                     raise ValueError("Could not determine the default branch.")
 
-            logger.info(f"Targeting remote repository {repo_path} {target_branch}")
+            logging.info(f"Targeting remote repository {repo_path} {target_branch}")
             cmd = ['git', 'ls-remote', repo_path, f'refs/heads/{target_branch}']
             result = subprocess.run(cmd, stdout=subprocess.PIPE)
             output = result.stdout.decode('utf-8').strip()
@@ -82,12 +85,12 @@ def get_git_info(repo_path, target_branch=unset):
         else:
             repo = git.Repo(repo_path)
             if target_branch != unset:
-                logger.info(f"Targeting local repository {repo_path} {target_branch}")
+                logging.info(f"Targeting local repository {repo_path} {target_branch}")
                 branch_commit = repo.refs[f"refs/remotes/origin/{target_branch}"].commit
                 commit = branch_commit.hexsha[:7]
                 branch = target_branch
             else:
-                logger.info(f"Targeting local repository {repo_path} {repo.active_branch.name}")
+                logging.info(f"Targeting local repository {repo_path} {repo.active_branch.name}")
                 repo.git.fetch()
                 commit = repo.head.object.hexsha[:7]
                 branch = repo.active_branch.name
@@ -95,11 +98,11 @@ def get_git_info(repo_path, target_branch=unset):
         return commit, branch
 
     except git.exc.GitCommandError as e:
-        logger.error(f"GitCommandError: {str(e)}. Status: {e.status}, Command: {e.command}, Stderr: {e.stderr}")
+        logging.error(f"GitCommandError: {str(e)}. Status: {e.status}, Command: {e.command}, Stderr: {e.stderr}")
         raise e
 
     except Exception as e:
-        logger.error(f"Returning exception: {e} Type: {type(e).__name__}")
+        logging.error(f"Returning exception: {e} Type: {type(e).__name__}")
         raise e
 
 
@@ -108,42 +111,42 @@ def pull_repo(repo_url, target_branch, target_commit):
     try:
         if not os.path.exists(STAGING_DIRECTORY):
             os.makedirs(STAGING_DIRECTORY)
-            logger.info(f"Created directory {STAGING_DIRECTORY}.")
+            logging.info(f"Created directory {STAGING_DIRECTORY}.")
             git.Repo.clone_from(repo_url, STAGING_DIRECTORY)
-            logger.info(f"Cloned repository {repo_url} to {STAGING_DIRECTORY}.")
+            logging.info(f"Cloned repository {repo_url} to {STAGING_DIRECTORY}.")
 
         repo = git.Repo(STAGING_DIRECTORY)
         if repo.is_dirty(untracked_files=True):
-            logger.error("The repository is dirty; aborting pull.")
+            logging.error("The repository is dirty; aborting pull.")
             return False
 
         if target_branch and target_commit:
             repo.git.checkout(target_branch)
             repo.git.checkout(target_commit)
-            logger.info(f"Switched to branch {target_branch} and pulled commit {target_commit}.")
+            logging.info(f"Switched to branch {target_branch} and pulled commit {target_commit}.")
 
         elif target_commit:
             repo.git.checkout(target_commit)
-            logger.info(f"Switched to commit {target_commit}.")
+            logging.info(f"Switched to commit {target_commit}.")
 
         elif target_branch:
             repo.git.checkout(target_branch)
             repo.git.pull()
-            logger.info(f"Switched to branch {target_branch} and pulled latest commit.")
+            logging.info(f"Switched to branch {target_branch} and pulled latest commit.")
 
         else:
             current_branch = repo.active_branch.name
             repo.git.pull()
-            logger.info(f"Pulled latest commit from current branch {current_branch}.")
+            logging.info(f"Pulled latest commit from current branch {current_branch}.")
 
         return True
 
     except git.exc.GitCommandError as e:
-        logger.error(f"GitCommandError: {str(e)}. Status: {e.status}, Command: {e.command}, Stderr: {e.stderr}")
+        logging.error(f"GitCommandError: {str(e)}. Status: {e.status}, Command: {e.command}, Stderr: {e.stderr}")
         raise e
 
     except Exception as e:
-        logger.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
+        logging.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
         raise e
 
 
@@ -157,11 +160,11 @@ def test_new_code():
         return True
 
     except py_compile.PyCompileError as e:
-        logger.error(f"PyCompileError: {str(e)}")
+        logging.error(f"PyCompileError: {str(e)}")
         raise e  # Raising the exception to the caller
 
     except Exception as e:
-        logger.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
+        logging.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
         raise e  # Raising the exception to the caller
 
 
@@ -174,15 +177,15 @@ async def process_all_extensions():
             if extension_name in bot.extensions:
                 try:
                     await bot.reload_extension(extension_name)  # add await
-                    logger.info(f"Reloaded extension: {extension_name}")
+                    logging.info(f"Reloaded extension: {extension_name}")
                 except (commands.ExtensionNotFound, commands.ExtensionFailed) as e:
-                    logger.error(f"Failed to reload extension {extension_name}: {e}")
+                    logging.error(f"Failed to reload extension {extension_name}: {e}")
             else:
                 try:
                     await bot.load_extension(extension_name)  # add await
-                    logger.info(f"Loaded extension: {extension_name}")
+                    logging.info(f"Loaded extension: {extension_name}")
                 except (commands.ExtensionNotFound, commands.ExtensionFailed) as e:
-                    logger.error(f"Failed to load extension {extension_name}: {e}")
+                    logging.error(f"Failed to load extension {extension_name}: {e}")
 
 
 # Add a check to see if the user is an admin role or administrator
@@ -202,11 +205,11 @@ async def update(ctx, *args):
     try:
         # Get git info of production code in BOT_DIRECTORY
         current_commit, current_branch = get_git_info(BOT_DIRECTORY)
-        logger.info(f"Current commit: {current_commit}, current branch: {current_branch}")
+        logging.info(f"Current commit: {current_commit}, current branch: {current_branch}")
 
         # Get git info of GIT_REPO_URL repo
         github_commit, github_branch = get_git_info(GIT_REPO_URL, target_branch=current_branch)
-        logger.info(f"Github commit: {github_commit}, github branch: {github_branch}")
+        logging.info(f"Github commit: {github_commit}, github branch: {github_branch}")
 
         # Parse arguments
         target_branch = unset
@@ -290,10 +293,10 @@ async def update(ctx, *args):
         bot_path = os.path.join(BOT_DIRECTORY, 'bot.py')
         if os.path.exists(staging_bot_path) and os.path.exists(bot_path):
             if filecmp.cmp(staging_bot_path, bot_path, shallow=False):
-                logger.info("The bot.py file is identical. Reloading extensions...")
+                logging.info("The bot.py file is identical. Reloading extensions...")
                 process_all_extensions()  # Function to reload Discord extensions
             else:
-                logger.info("The bot.py file has been changed. Restarting script...")
+                logging.info("The bot.py file has been changed. Restarting script...")
                 sys.exit()  # This will exit the script, WinSW should handle the restart
 
     except Exception as e:
@@ -303,8 +306,8 @@ async def update(ctx, *args):
 # Discord on ready event with logging
 @bot.event
 async def on_ready():
-    logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-    logger.info(f'Discord.py version: {discord.__version__}')
+    logging.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
+    logging.info(f'Discord.py version: {discord.__version__}')
 
 
 # Command to provide a link to the source code GIT_REPO_URL, state license as AGPL-3.0, strip the .git suffix
