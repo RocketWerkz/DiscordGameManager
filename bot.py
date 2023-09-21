@@ -143,23 +143,22 @@ def pull_repo(repo_url, repo_path, target_branch, target_commit):
             logging.error("The repository is dirty; aborting pull.")
             return False
 
-        if target_branch and target_commit:
-            repo.git.checkout(target_branch)
-            repo.git.checkout(target_commit)
-            logging.info(f"Switched to branch {target_branch} and pulled commit {target_commit}.")
+        # Fetch the latest from the remote
+        repo.git.fetch('origin')
 
-        elif target_commit:
+        if target_commit:
+            logging.info(f"Switching to commit {target_commit}.")
             repo.git.checkout(target_commit)
             logging.info(f"Switched to commit {target_commit}.")
-
         elif target_branch:
+            logging.info(f"Switching to branch {target_branch} and pulling latest commit.")
             repo.git.checkout(target_branch)
-            repo.git.pull()
+            repo.git.pull('origin', target_branch)
             logging.info(f"Switched to branch {target_branch} and pulled latest commit.")
-
         else:
             current_branch = repo.active_branch.name
-            repo.git.pull()
+            logging.info(f"Pulling latest commit from current branch {current_branch}.")
+            repo.git.pull('origin', current_branch)
             logging.info(f"Pulled latest commit from current branch {current_branch}.")
 
         return True
@@ -278,7 +277,7 @@ async def update(ctx, *args):
                 return
 
         else:
-            # Compare current commit and branch to github commit and branch
+            # Compare current commit and branch to GitHub commit and branch
             if github_branch == current_branch and github_commit == current_commit:
                 await ctx.send(
                     f"Current commit is already {github_commit} and branch is already {github_branch}. No action taken.")
