@@ -116,8 +116,8 @@ class AppIDCog(commands.Cog):
             logging.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
             raise e
 
+        # Fetch the data for each AppID
         client = SteamClient()
-
         data_changed = False  # Track if the data has changed
 
         for app_id in existing_app_ids:
