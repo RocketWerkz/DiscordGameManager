@@ -37,35 +37,53 @@ class AppInfoFetcher:
         logging.debug(f"AppInfoFetcher initialized with retries: {retries}, timeout: {timeout}")
 
     def fetch_info(self, app_id, client):
-        logging.info(f"Fetching info for AppID: {app_id}")
+        logging.info(f"Starting the process to fetch info for AppID: {app_id}")
         try:
-            app_id = int(app_id)  # Convert app_id to an integer
-            with gevent.Timeout(self.timeout):
-                client.anonymous_login()
-                client.verbose_debug = False
-                data = client.get_product_info(apps=[app_id], timeout=1)
+            app_id = int(app_id)
+            logging.debug(f"AppID {app_id} converted to integer")
 
-                if data:
-                    logging.debug(f"Data fetched for AppID {app_id}: {data}")
-                    service_name = data.get('common', {}).get('name')
-                    build_id = data.get('depots', {}).get('branches', {}).get('public', {}).get('buildid')
-                    branches = data.get('depots', {}).get('branches', {})
-                    if service_name and build_id:
-                        password_required = {key: branches[key].get('pwdrequired', "0") == "1" for key in branches}
-                        return {
-                            "name": service_name,
-                            "build_id": build_id,
-                            "branch": 'public',
-                            "branches": list(branches.keys()),
-                            "password_required": password_required,
-                        }
+            if not client.logged_on:
+                logging.debug(f"Client not logged on, logging on")
+                with gevent.Timeout(self.timeout):
+                    client.anonymous_login()
+                    logging.debug(f"Anonymous login for client successful")
+
+            else:
+                logging.debug(f"Client already logged on")
+
+            client.verbose_debug = False
+            data = client.get_product_info(apps=[app_id], timeout=1)
+
+            if data:
+                logging.debug(f"Data fetched for AppID {app_id}: {data}")
+                service_name = data['apps'][app_id]['common']['name']
+                branches = data['apps'][app_id]['depots']['branches']
+                build_id = branches.get('public', {}).get('buildid')
+                logging.debug(
+                    f"Parsed values - Service Name: {service_name}, Build ID: {build_id}, Branches: {branches}")
+
+                if service_name and build_id:
+                    password_required = {key: branches[key].get('pwdrequired', "0") == "1" for key in branches}
+                    logging.debug(f"Password requirement parsed for branches: {password_required}")
+                    logging.debug(
+                        f"Returning data for AppID {app_id}: service_name: {service_name}, build_id: {build_id}, password_required: {password_required}")
+                    return {
+                        "name": service_name,
+                        "build_id": build_id,
+                        "branch": 'public',
+                        "branches": list(branches.keys()),
+                        "password_required": password_required,
+                    }
                 else:
-                    raise Exception(f"Exception occurred while getting game info for AppID {app_id}")
+                    logging.warning(f"Required data (service_name or build_id) missing for AppID {app_id}")
+            else:
+                logging.warning(f"No data returned for AppID {app_id}")
         except gevent.Timeout as e:
-            logging.error(f"Timeout error: {str(e)}")
+            logging.error(f"Timeout error: {str(e)} while fetching info for AppID {app_id}")
             raise e
         except Exception as e:
-            logging.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
+            logging.error(
+                f"An unexpected error occurred while fetching info for AppID {app_id}: {str(e)}. Type: {type(e).__name__}")
             raise e
 
 
@@ -79,10 +97,10 @@ class AppIDCog(commands.Cog):
     async def on_ready(self):
         logging.info("AppIDCog on_ready started")
         try:
-            current_app_ids = set(str(app_id) for app_id in APP_ID_LIST.split(','))
             if os.path.exists('server_info.json'):
                 server_info = read_server_info('server_info.json')
                 existing_app_ids = set(server_info.get(COMPUTER_NAME, {}).keys())
+                logging.debug(f"Existing AppIDs: {existing_app_ids}")
             else:
                 server_info = {COMPUTER_NAME: {}}
                 existing_app_ids = set()
@@ -98,31 +116,30 @@ class AppIDCog(commands.Cog):
             logging.error(f"An unexpected error occurred: {str(e)}. Type: {type(e).__name__}")
             raise e
 
-        new_app_ids = current_app_ids.difference(existing_app_ids)
-        removed_app_ids = existing_app_ids.difference(current_app_ids)
         client = SteamClient()
 
-        if new_app_ids:
-            for app_id in new_app_ids:
-                try:
-                    steam_data = self.app_info_fetcher.fetch_info(app_id, client)
-                    if steam_data:  # Only add it if it's not None or empty
-                        server_info[COMPUTER_NAME][app_id] = steam_data
-                        logging.info(f"Added AppID {app_id} to server info")
-                except Exception as e:
-                    logging.error(f"An unexpected error occurred while processing AppID {app_id}: {str(e)}. Type: {type(e).__name__}")
-                    raise e
-            write_server_info('server_info.json', server_info)
+        data_changed = False  # Track if the data has changed
 
-        if removed_app_ids:
-            for app_id in removed_app_ids:
-                del server_info[COMPUTER_NAME][str(app_id)]
-                logging.info(f"Removed AppID {app_id} from server info")
+        for app_id in existing_app_ids:
+            try:
+                steam_data = self.app_info_fetcher.fetch_info(app_id, client)
+                if steam_data:
+                    server_info[COMPUTER_NAME][app_id] = steam_data
+                    logging.info(f'Updating AppID {app_id} info')
+                    data_changed = True  # Data has changed
+            except Exception as e:
+                logging.error(
+                    f"An unexpected error occurred while processing AppID {app_id}: {str(e)}. Type: {type(e).__name__}")
+                raise e
+
+        # Only write the data to the file if it has changed
+        if data_changed:
             write_server_info('server_info.json', server_info)
 
         logging.info("AppIDCog on_ready completed")
 
 
 async def setup(bot):
-    await bot.add_cog(AppIDCog(bot))
-    logging.info("AppIDCog added to bot")
+    cog = AppIDCog(bot)
+    await bot.add_cog(cog)
+    logging.info(f"{cog.__class__.__name__} added to bot")

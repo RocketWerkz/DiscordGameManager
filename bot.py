@@ -18,7 +18,7 @@ import platform
 from steam.client import SteamClient
 
 # Initialize default logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 
 # Load environment variables
 load_dotenv()
@@ -29,7 +29,6 @@ BOT_DIRECTORY = os.path.dirname(os.path.realpath(__file__))
 STAGING_DIRECTORY = os.path.join(BOT_DIRECTORY, 'staging')
 EXTENSIONS_DIRECTORY = os.path.join(BOT_DIRECTORY, 'extensions')
 COGS_DIRECTORY = os.path.join(BOT_DIRECTORY, 'cogs')
-APP_ID_LIST = os.getenv('APP_ID_LIST')
 COMPUTER_NAME = os.environ.get("COMPUTERNAME", "") if os.name == 'nt' else os.environ.get("HOSTNAME", "")
 
 # Random hash included in UNSET_VALUE_ to prevent accidental use of UNSET_VALUE_
@@ -54,35 +53,51 @@ bot = commands.Bot(command_prefix='*', intents=intents)
 
 # Fetch current info as git commit and branch, or commit of a provided branch
 def get_github_default_branch(repo_url):
+    logging.info(f'Fetching default branch for {repo_url}')
     user_repo = "/".join(repo_url.split('/')[-2:])
     url = f"https://api.github.com/repos/{user_repo}"
     try:
         response = requests.get(url)
         if response.status_code == 200:
+            logging.info(f"Default branch for {repo_url} is {response.json()['default_branch']}")
             return response.json()["default_branch"]
+        else:
+            logging.error(f"Could not get default branch: {response.status_code} {response.reason}")
     except Exception as e:
         logging.error(f"Could not get default branch: {e}")
         return None
 
 
+def handle_http_git_info(repo_path, target_branch=unset):
+    logging.info(f"Target branch is unset. Trying to determine the default branch for {repo_path}.")
+    if target_branch == unset:
+        target_branch = get_github_default_branch(repo_path)
+    if target_branch == unset:
+        logging.error(f"Failed to determine the default branch for {repo_path}.")
+        raise ValueError("Could not determine the default branch.")
+    logging.info(f"Targeting remote repository {repo_path} {target_branch}")
+    cmd = ['git', 'ls-remote', repo_path, f'refs/heads/{target_branch}']
+    result = subprocess.run(cmd, stdout=subprocess.PIPE)
+    output = result.stdout.decode('utf-8').strip()
+
+    if output:
+        logging.debug(f'Received output from ls-remote command: {output}')
+        commit_hash = output.split()[0]
+        commit = commit_hash[:7]  # Shorten to 7 characters
+        branch = target_branch
+        logging.info(f'Determined commit {commit} for branch {branch}')
+
+    return commit, branch
+
+
 def get_git_info(repo_path, target_branch=unset):
     try:
+        logging.info(f'Fetching git info for {repo_path}')
+        # Check if repo_path is a remote git repo using http or https via handle_http_git_info
         if repo_path.startswith('http') or repo_path.startswith('https'):
-            if target_branch == unset:
-                target_branch = get_github_default_branch(repo_path)
-                if target_branch is None:
-                    raise ValueError("Could not determine the default branch.")
-
-            logging.info(f"Targeting remote repository {repo_path} {target_branch}")
-            cmd = ['git', 'ls-remote', repo_path, f'refs/heads/{target_branch}']
-            result = subprocess.run(cmd, stdout=subprocess.PIPE)
-            output = result.stdout.decode('utf-8').strip()
-
-            if output:
-                commit_hash = output.split()[0]
-                commit = commit_hash[:7]  # Shorten to 7 characters
-                branch = target_branch
-        else:
+            commit, branch = handle_http_git_info(repo_path, target_branch)
+        # Check if repo_path is a local directory with a git repo in it
+        elif os.path.isdir(repo_path) and os.path.isdir(os.path.join(repo_path, '.git')):
             repo = git.Repo(repo_path)
             if target_branch != unset:
                 logging.info(f"Targeting local repository {repo_path} {target_branch}")
@@ -94,6 +109,12 @@ def get_git_info(repo_path, target_branch=unset):
                 repo.git.fetch()
                 commit = repo.head.object.hexsha[:7]
                 branch = repo.active_branch.name
+        else:
+            # If we get here, we couldn't determine the git info, meaning we need to make .git info, we will assume
+            # we are using the default GitHub branch and url via GIT_REPO_URL and will pull it down into Staging directory
+            logging.info(f'Could not determine git info for {repo_path}.')
+            commit, branch = handle_http_git_info(GIT_REPO_URL, target_branch)
+            pull_repo(GIT_REPO_URL, STAGING_DIRECTORY, branch, commit)
 
         return commit, branch
 
@@ -107,15 +128,17 @@ def get_git_info(repo_path, target_branch=unset):
 
 
 # Function to pull from GIT_REPO_URL repo into STAGING_DIRECTORY
-def pull_repo(repo_url, target_branch, target_commit):
+def pull_repo(repo_url, repo_path, target_branch, target_commit):
     try:
-        if not os.path.exists(STAGING_DIRECTORY):
-            os.makedirs(STAGING_DIRECTORY)
-            logging.info(f"Created directory {STAGING_DIRECTORY}.")
-            git.Repo.clone_from(repo_url, STAGING_DIRECTORY)
-            logging.info(f"Cloned repository {repo_url} to {STAGING_DIRECTORY}.")
+        if not os.path.exists(repo_path):
+            os.makedirs(repo_path)
+            logging.info(f"Created directory {repo_path}.")
+        if not os.path.isdir(os.path.join(repo_path, '.git')):
+            git.Repo.clone_from(repo_url, repo_path)
+            logging.info(f"Cloned repository {repo_url} to {repo_path}.")
 
-        repo = git.Repo(STAGING_DIRECTORY)
+        logging.info(f'Pulling {repo_url} {target_branch} {target_commit} into {repo_path}')
+        repo = git.Repo(repo_path)
         if repo.is_dirty(untracked_files=True):
             logging.error("The repository is dirty; aborting pull.")
             return False
@@ -262,7 +285,7 @@ async def update(ctx, *args):
                 return
 
         # Pull from GIT_REPO_URL repo into STAGING_DIRECTORY
-        if pull_repo(GIT_REPO_URL, target_branch=target_branch, target_commit=target_commit):
+        if pull_repo(GIT_REPO_URL, STAGING_DIRECTORY, target_branch=target_branch, target_commit=target_commit):
             await ctx.send(f"Repository at {GIT_REPO_URL} updated successfully for {STAGING_DIRECTORY}.")
         else:
             await ctx.send(f"Failed to update the repository at {GIT_REPO_URL}.")
@@ -282,11 +305,11 @@ async def update(ctx, *args):
             raise e
 
         # Pull from GIT_REPO_URL repo into BOT_DIRECTORY
-        if pull_repo(GIT_REPO_URL, target_branch=target_branch, target_commit=target_commit):
-            await ctx.send(f"Repository at {GIT_REPO_URL} updated successfully for {BOT_DIRECTORY}.")
-        else:
-            await ctx.send(f"Failed to update the repository at {GIT_REPO_URL}.")
-            return
+        # if pull_repo(GIT_REPO_URL, BOT_DIRECTORY, target_branch=target_branch, target_commit=target_commit):
+        #    await ctx.send(f"Repository at {GIT_REPO_URL} updated successfully for {BOT_DIRECTORY}.")
+        # else:
+        #    await ctx.send(f"Failed to update the repository at {GIT_REPO_URL}.")
+        #    return
 
         # Check if the bot.py file is the same or has been changed
         staging_bot_path = os.path.join(STAGING_DIRECTORY, 'bot.py')
